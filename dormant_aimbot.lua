@@ -20,20 +20,20 @@ hboxes["right_upper_arm"] = 17
 hboxes["right_forearm"]   = 18
 
 -- ui
-local ui_dormant        = ui.create("Dormant Aimbot")
-local ui_dormant_switch = ui_dormant:switch("Dormant Aimbot", false)
-local ui_dormant_logs   = ui_dormant:switch("Logs", false)
+local ui_dormant             = ui.create("Dormant Aimbot")
+local ui_dormant_switch      = ui_dormant:switch("Dormant Aimbot", false)
+local ui_dormant_logs        = ui_dormant:switch("Logs", false)
 
-local ui_settings          = ui.create("Settings")
-local ui_settings_hitboxes = ui_settings:selectable("Hitboxes", "Head", "Chest", "Stomach", "Arms", "Legs", "Feet")
+local ui_settings            = ui.create("Settings")
+local ui_settings_hitboxes   = ui_settings:selectable("Hitboxes", "Head", "Chest", "Stomach", "Arms", "Legs", "Feet")
 
 local ui_settings_mindmg     = ui_settings:slider("Minimum Damage", 1, 100, 1)
-local ui_settings_hitchance  = ui_settings:slider("Hitchance", 1, 100, 60)
-local ui_settings_alpha      = ui_settings:slider("Alpha", 1, 1000, 650)
+local ui_settings_hitchance  = ui_settings:slider("Hitchance", 1, 100, 70)
+local ui_settings_alpha      = ui_settings:slider("Alpha", 1, 1000, 300, 0.001)
 
-local ui_accuracy           = ui.create("Accuracy")
-local ui_accuracy_autoscope = ui_accuracy:switch("Auto Scope", false)
-local ui_accuracy_autostop  = ui_accuracy:switch("Auto Stop", false)
+local ui_accuracy            = ui.create("Accuracy")
+local ui_accuracy_autoscope  = ui_accuracy:switch("Auto Scope", false)
+local ui_accuracy_autostop   = ui_accuracy:switch("Auto Stop", false)
 
 local dormant_aimbot = new_class()
     :struct 'consts' {
@@ -49,15 +49,10 @@ local dormant_aimbot = new_class()
         WEAPONTYPE_TASER         = 8,
         WEAPONTYPE_GRENADE       = 9,
         WEAPONTYPE_HEALTHSHOT 	 = 11,
-        hbox_radius = { 4.2, 3.5, 6, 6, 6.5, 6.2, 5, 5, 5, 4, 4, 3.6, 3.7, 4, 4, 3.3, 3, 3.3, 3 },
-        hbox_factor = { 0.5, 0.1, 0.8, 0.8, 0.7, 0.7, 0.6, 0.5, 0.5, 0.5, 0.5, 0.4, 0.4, 0.4, 0.4, 0.5, 0.5, 0.5, 0.5 },
-        hitgroup_str = {
-            [0] = 'generic',
-            'head', 'chest', 'stomach',
-            'left arm', 'right arm',
-            'left leg', 'right leg',
-            'neck', 'generic', 'gear'
-        }
+
+        hbox_radius              = { 4.2, 3.5, 6.0, 6.0, 6.5, 6.2, 5.0, 5.0, 5.0, 4.0, 4.0, 3.6, 3.7, 4.0, 4.0, 3.3, 3.0, 3.3, 3.0 },
+        hbox_factor              = { 0.5, 0.1, 0.8, 0.8, 0.7, 0.7, 0.7, 0.5, 0.5, 0.5, 0.5, 0.4, 0.4, 0.4, 0.4, 0.5, 0.5, 0.5, 0.5 },
+        hitgroup_str             = { [0] = "generic", "head", "chest", "stomach", "left arm", "right arm", "left leg", "right leg", "neck", "generic", "gear" }
     }
     :struct 'aimbot_shot' {
         tickcount = nil,
@@ -68,96 +63,127 @@ local dormant_aimbot = new_class()
         handled   = nil
     }
     :struct 'variables' {
-        hbox_state   = { false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false },
-        is_reachable = {},
+        hbox_state       = { false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false },
+        is_reachable     = {},
 
-        cmd         = nil,
-        lp          = nil,
-        weapon      = nil,
-        weapon_info = nil,
-        eyepos      = nil,
+        cmd              = nil,
+        lp               = nil,
+        eyepos           = nil,
+
+        weapon           = nil,
+        weapon_info      = nil,
+        weapon_type      = nil,
+        range_modifier   = nil,
+        armor_resist     = nil,
 
         camera_position  = nil,
         camera_direction = nil,
 
-        mindmg = nil,
-        minhc  = nil,
+        mindmg           = nil,
+        minhc            = nil,
 
-        dmg = nil,
+        dmg              = nil,
+        dmg_is_wrong     = nil,
 
-        initialize = function(self, cmd)
-            self.cmd         = cmd
-            self.lp          = entity.get_local_player()
-            self.weapon      = self.lp:get_player_weapon()
-            self.weapon_info = self.weapon:get_weapon_info()
-            self.eyepos      = self.lp:get_eye_position()
-            
-            self.camera_position = render.camera_position()
-            self.direction       = vector():angles(render.camera_angles())
+        initialize       = function(self, cmd)
+            self.cmd              = cmd
+            self.lp               = entity.get_local_player()
+            self.eyepos           = self.lp:get_eye_position()
 
-            self.mindmg = ui_settings_mindmg:get()
-            self.minhc  = ui_settings_hitchance:get()
+            self.weapon           = self.lp:get_player_weapon()
+            self.weapon_info      = self.weapon:get_weapon_info()
+            self.weapon_type      = self.weapon_info["weapon_type"]
+            self.range_modifier   = self.weapon_info["range_modifier"]
+            self.armor_resist     = 1.0 - self.weapon_info["armor_ratio"] * 0.5
+
+            self.camera_position  = render.camera_position()
+            self.camera_direction = vector():angles(render.camera_angles())
+
+            self.mindmg           = ui_settings_mindmg:get()
+            self.minhc            = ui_settings_hitchance:get()
+
+            self.dmg_is_wrong = false
         end,
     }
     :struct 'aimbot' {
-        get_hitgroup_name = function(self, hbox)
+        get_hitgroup_index = function(self, hbox)
             if hbox == 1 then
-                return "head"
+                return 1
             end
             if hbox == 2 then
-                return "neck"
+                return 8
             end
             if 3 <= hbox and hbox <= 4 then
-                return "stomach"
+                return 3
             end
             if 5 <= hbox and hbox <= 7 then
-                return "chest"
+                return 2
             end
             if 8 <= hbox and hbox <= 13 then
                 if hbox % 2 == 0 then
-                    return "left leg"
+                    return 6
                 else
-                    return "right leg"
+                    return 7
                 end
             end
             if 14 <= hbox and hbox <= 19 then
                 if hbox % 2 == 1 then
-                    return "left arm"
+                    return 4
                 else
-                    return "right arm"
+                    return 5
                 end
             end
-            return "generic" -- a little bit incorrect but who cares?
+
+            return 0 -- a little bit incorrect but who cares?
+        end,
+
+        get_hitgroup_name = function(self, hbox)
+            return self.consts.hitgroup_str[self:get_hitgroup_index(hbox)]
+        end,
+
+        get_damage_multiplier = function(self, hbox)
+            local hgroup = self:get_hitgroup_name(hbox)
+            if hgroup == "head" then
+                return 4.0
+            end
+            if hgroup == "stomach" then
+                return 1.25
+            end
+            if hgroup == "left leg" or hgroup == "right leg" then
+                return 0.75
+            end
+
+            return 1.0
         end,
 
         get_weighted_damage = function(self, hbox, dmg) -- safety order: stomach, chest, limbs, head (head is so fucking unsafe)
             local hgroup = self:get_hitgroup_name(hbox)
-            if hgroup == "generic" then
-                return 0
-            end
+
             if hgroup == "head" or hgroup == "neck" then
-                return dmg / 8
+                return dmg * 0.125
             end
             if hgroup == "left arm" or hgroup == "right arm" or hgroup == "left leg" or hgroup == "right leg" then
-                return dmg / 4
+                return dmg * 0.25
             end
             if hgroup == "chest" then
-                return dmg / 1.5
+                return dmg * 0.67
             end
             if hgroup == "stomach" then
                 return dmg
             end
+
+            return 0
         end,
 
         get_hbox_radius = function(self, hbox)
             if hbox == nil then
-                return 0
+                return 0.0
             end
     
             return self.consts.hbox_radius[hbox] * self.consts.hbox_factor[hbox]
         end,
 
-        calculate_hc = function(self, inaccuracy, point, radius) 
+        calculate_hc = function(self, inaccuracy, point, radius) -- [0, 1]
             -- if x -> 0 then tan(x) ~ x therefore R ~ distance * inaccuracy
             -- max distance is 8192 so R <= 8192 * inaccuracy
             -- hc = (radius / R) ^ 2 >= (radius / (8192 * inaccuracy)) ^ 2 
@@ -166,17 +192,17 @@ local dormant_aimbot = new_class()
             -- then inaccuracy <= 1 / 819200 < 1e-6
             -- so if inaccuracy < 1e-6 then hc > 100 
             if inaccuracy < 1e-6 then 
-                return 100
+                return 1.0
             end
 
             local distance = self.variables.eyepos:dist(point)
-            local R = distance * math.tan(inaccuracy / 2) -- / 2 cuz of geometry
+            local R = distance * math.tan(inaccuracy * 0.5) -- / 2 cuz of geometry
 
-            return math.min(radius * radius / (R * R), 1) * 100
+            return math.min(radius * radius / (R * R), 1.0)
         end,
 
-        max_hc = function(self, point, radius)
-            if self.variables.weapon_info["weapon_type"] == self.consts.WEAPONTYPE_SNIPER_RIFLE and (ui_accuracy_autoscope:get() or self.variables.lp["m_bIsScoped"]) then 
+        max_hc = function(self, point, radius) -- [0, 1]
+            if self.variables.weapon_type == self.consts.WEAPONTYPE_SNIPER_RIFLE and (ui_accuracy_autoscope:get() or self.variables.lp["m_bIsScoped"]) then 
                 if self.variables.cmd.in_duck == 1 then
                     return self:calculate_hc(self.variables.weapon_info["inaccuracy_crouch_alt"], point, radius)
                 else
@@ -191,35 +217,118 @@ local dormant_aimbot = new_class()
             end
         end,
 
-        choose_hbox = function(self, target) -- tries to prefer safety over dmg
-            local best_hbox
-            local highest_w_dmg = 0
-            local idx = target:get_index()
+        sign = function(self, value)
+            return value >= 0.0 and 1 or -1
+        end,
+
+        vector_ratio = function(self, vec1, vec2) -- returns nil if vectors arent collinear
+            local are_opposite
+
+            if self:sign(vec1.x) == self:sign(vec2.x) and self:sign(vec1.y) == self:sign(vec2.y) and self:sign(vec1.z) == self:sign(vec2.z) then
+                are_opposite = false
+            elseif self:sign(vec1.x) ~= self:sign(vec2.x) and self:sign(vec1.y) ~= self:sign(vec2.y) and self:sign(vec1.z) ~= self:sign(vec2.z) then
+                are_opposite = true
+            else
+                return nil
+            end
+
+            vec1 = vector(math.abs(vec1.x), math.abs(vec1.y), math.abs(vec1.z))
+            vec2 = vector(math.abs(vec2.x), math.abs(vec2.y), math.abs(vec2.z))
+
+            local lx = (vec1.x - 0.05) / (vec2.x + 0.05)
+            local rx = (vec1.x + 0.05) / (vec2.x - 0.05)
+            local ly = (vec1.y - 0.05) / (vec2.y + 0.05)
+            local ry = (vec1.y + 0.05) / (vec2.y - 0.05)
+            local lz = (vec1.z - 0.05) / (vec2.z + 0.05)
+            local rz = (vec1.z + 0.05) / (vec2.z - 0.05)
+
+            local l = math.max(lx, ly, lz)
+            local r = math.min(rx, ry, rz)
+
+            if l <= r then
+                local ratio = l + (r - l) * 0.5
+                return -ratio and are_opposite or ratio
+            end
+            
+            return nil
+        end,
+
+        calc_true_damage = function(self, hbox, target_hbox_pos, armor, has_helmet)
+            local dmg, trace = utils.trace_bullet(self.variables.lp, self.variables.eyepos, target_hbox_pos)
         
+            if dmg == 0 then
+                local vec_target = target_hbox_pos - self.variables.eyepos
+                local vec_trace  = trace.end_pos - self.variables.eyepos
+                local ratio = self:vector_ratio(vec_target, vec_trace) -- vec_target(trace).x(y)(z) > 0.05 (its achieveable only if you stand right next to enemy, but then it's not dormant)
+
+                if ratio ~= nil and ratio < 1.0 then -- if bullet stopped after "hitting" enemy we can shoot and deal some dmg, but cant calculate dmg because API doesnt allow | revolver+nuke fix
+                    return -1
+                end
+            end
+
+            if trace.hitgroup == 0 and dmg > 0.0 then -- if target is dormant then bullet wouldn't hit it therefore will hit CWorld and then hitgroup == generic (0). So we need some adjustments to calculated damage...
+                local dist = target_hbox_pos:dist(trace.end_pos)
+
+                dmg = dmg * self:get_damage_multiplier(hbox)                                -- hitgroup fix
+                dmg = dmg / math.pow(self.variables.range_modifier, dist / 500.0)           -- distance fix
+
+                if has_helmet and hbox == 1 or armor > 0 and (hbox <= 7 or hbox >= 14) then -- armor fix
+                    local absorbed = dmg * self.variables.armor_resist
+                    dmg = dmg - math.min(absorbed, 2.0 * armor) -- armor gets damaged by absorbed/2
+                end
+            end
+
+            return dmg
+        end,
+
+        choose_hbox = function(self, target) -- tries to prefer safety over dmg
+            local idx = target:get_index()
+
             self.variables.is_reachable[idx] = false
+
+            local best_hbox
+            local highest_w_dmg = 0.0
             
             for hbox = 1, #self.variables.hbox_state do
                 if self.variables.hbox_state[hbox] then
                     local target_hbox_pos = target:get_hitbox_position(hbox - 1) -- lua starts array indexes with 1
-
-                    local dmg = utils.trace_bullet(self.variables.lp, self.variables.eyepos, target_hbox_pos)
-                    local hc = self:max_hc(target_hbox_pos, self:get_hbox_radius(hbox))
-
-                    if dmg > 0 then
+                    
+                    dmg = self:calc_true_damage(hbox, target_hbox_pos, target["m_ArmorValue"], target["m_bHasHelmet"])
+                    local is_wrong = dmg == -1
+                    if is_wrong then
+                        dmg = self.variables.weapon_info["damage"]
+                    end
+                    
+                    if dmg > 0.0 then
                         self.variables.is_reachable[idx] = true
                     end
 
-                    if dmg >= self.variables.mindmg and hc >= self.variables.minhc then
+                    local hc = self:max_hc(target_hbox_pos, self:get_hbox_radius(hbox))
+
+                    if dmg >= self.variables.mindmg and 100 * hc >= self.variables.minhc then
                         local w_dmg = self:get_weighted_damage(hbox, dmg)
                         if w_dmg > highest_w_dmg then
-                            best_hbox = hbox
-                            highest_w_dmg = w_dmg
-                            self.variables.dmg = dmg
+                            best_hbox                   = hbox
+                            highest_w_dmg               = w_dmg
+                            self.variables.dmg          = dmg
+                            self.variables.dmg_is_wrong = is_wrong
                         end
                     end
                 end
             end
+
             return best_hbox
+        end,
+
+        lp_check = function(self) 
+            if not globals.is_connected then
+                return false
+            end
+            if not globals.is_in_game then
+                return false
+            end
+
+            return true
         end,
 
         target_check = function(self, target)
@@ -235,11 +344,15 @@ local dormant_aimbot = new_class()
                 return false
             end
     
-            if target:get_network_state() == 0 or target:get_bbox().alpha < ui_settings_alpha:get() / 1000 then
+            if target:get_network_state() == 0 then -- not dormant
                 return false
             end
 
-            if self:choose_hbox(target) == nil then
+            if target:get_bbox().alpha < ui_settings_alpha:get() * 0.001 then -- dormant is outdated
+                return false
+            end
+
+            if self:choose_hbox(target) == nil then -- dmg == 0
                 return false
             end
     
@@ -251,17 +364,15 @@ local dormant_aimbot = new_class()
                 return false
             end
     
-            local weapon_type = self.variables.weapon_info["weapon_type"]
-    
-            if weapon_type == nil or weapon_type == self.consts.WEAPONTYPE_KNIFE or weapon_type >= self.consts.WEAPONTYPE_C4 then
+            if self.variables.weapon_type == nil or self.variables.weapon_type == self.consts.WEAPONTYPE_KNIFE or self.variables.weapon_type >= self.consts.WEAPONTYPE_C4 then
                 return false
             end
 
-            if self.variables.weapon:get_weapon_reload() ~= -1 then
+            if self.variables.weapon:get_weapon_reload() ~= -1 then -- is reloading
                 return false
             end
     
-            if self.variables.lp:get_origin():dist(target:get_origin()) > self.variables.weapon_info["range"] then
+            if self.variables.lp:get_origin():dist(target:get_origin()) > self.variables.weapon_info["range"] then -- out of range
                 return false
             end
     
@@ -272,16 +383,15 @@ local dormant_aimbot = new_class()
             return true
         end,
     
-        choose_target = function(self) -- closest to camera | pasted from nl lua api gitbook
+        choose_target = function(self) -- closest to camera | WARNING!!! FULLY PASTED CODE HERE
             local players = entity.get_players(true)
 
             local best_player
             local best_distance = math.huge
-    
             for _, player in ipairs(players) do
-                if self:target_check(player) and self:weapon_check(player) then
+                if self:lp_check() and self:weapon_check(player) and self:target_check(player) then
                     local origin = player:get_origin()
-                    local ray_distance = origin:dist_to_ray(self.variables.camera_position, self.variables.direction)
+                    local ray_distance = origin:dist_to_ray(self.variables.camera_position, self.variables.camera_direction)
                     if ray_distance < best_distance then
                         best_distance = ray_distance
                         best_player = player
@@ -320,11 +430,16 @@ local dormant_aimbot = new_class()
                 return
             end
 
+            if not self:lp_check() then
+                return
+            end
+
             if self.aimbot_shot.tickcount ~= nil and globals.tickcount - self.aimbot_shot.tickcount > 1 and not self.aimbot_shot.handled then
                 if ui_dormant_logs:get() then
-                    print_raw(("\a00FF00[Dormant Aimbot] \aFFFFFFMissed %s(%d) in %s for %d damage"):format(
+                    print_raw(("\a00FF00[Dormant Aimbot] \aFFFFFFMissed %s(%d%s) in %s for %d damage"):format(
                     self.aimbot_shot.victim:get_name(), 
                     self.aimbot_shot.hitchance,
+                    "%",
                     self.aimbot_shot.hitgroup,
                     self.aimbot_shot.damage
                 ))
@@ -335,14 +450,12 @@ local dormant_aimbot = new_class()
             self.variables:initialize(cmd)
 
             local target = self:choose_target()
-
             if target == nil then
                 return
             end
-    
-            local hbox = self:choose_hbox(target)
-            
-            local aim_point = target:get_hitbox_position(hbox - 1)
+
+            local hbox       = self:choose_hbox(target)
+            local aim_point  = target:get_hitbox_position(hbox - 1)
             local aim_angles = self.variables.eyepos:to(aim_point):angles()
 
             if ui_accuracy_autostop:get() then
@@ -352,18 +465,27 @@ local dormant_aimbot = new_class()
                 self:autoscope()
             end
 
-            local hc = self:calculate_hc(self.variables.weapon:get_inaccuracy(), aim_point, self:get_hbox_radius(hbox))
+            local hc
+            if self.variables.weapon_info["is_revolver"] then
+                if self.variables.cmd.in_duck == 1 then
+                    hc = self:calculate_hc(self.variables.weapon:get_inaccuracy() * 0.2, aim_point, self:get_hbox_radius(hbox))
+                else
+                    hc = self:calculate_hc(self.variables.weapon:get_inaccuracy() * 0.166, aim_point, self:get_hbox_radius(hbox))
+                end
+            else 
+                hc = self:calculate_hc(self.variables.weapon:get_inaccuracy(), aim_point, self:get_hbox_radius(hbox))
+            end
 
-            if hc >= self.variables.minhc then
+            if 100 * hc >= self.variables.minhc then
                 self.variables.cmd.view_angles = aim_angles
                 self.variables.cmd.in_attack   = true
 
-                self.aimbot_shot.tickcount = globals.tickcount
-                self.aimbot_shot.victim    = target
-                self.aimbot_shot.hitchance = hc
-                self.aimbot_shot.hitgroup  = self:get_hitgroup_name(hbox)
-                self.aimbot_shot.damage    = self.variables.dmg
-                self.aimbot_shot.handled   = false
+                self.aimbot_shot.tickcount     = globals.tickcount
+                self.aimbot_shot.victim        = target
+                self.aimbot_shot.hitchance     = 100 * hc
+                self.aimbot_shot.hitgroup      = self:get_hitgroup_name(hbox)
+                self.aimbot_shot.damage        = self.variables.dmg_is_wrong and -1 or self.variables.dmg
+                self.aimbot_shot.handled       = false
             end
         end,
         
@@ -382,7 +504,9 @@ local dormant_aimbot = new_class()
                 state[value] = true
             end
 
-            self.variables.hbox_state[1] = state["Head"]
+            for i = 1, 1 do
+                self.variables.hbox_state[1] = state["Head"]
+            end
             for i = 5, 7 do
                 self.variables.hbox_state[i] = state["Chest"]
             end
@@ -413,7 +537,7 @@ ui_settings_hitboxes:set_callback(function()
 end)
 
 local esp_dormant_flag = esp.enemy:new_text("Dormant Aimbot", "DA", function(player)
-    if dormant_aimbot.variables.is_reachable[player:get_index()] and player:get_network_state() ~= 0 and player:get_network_state() ~= 5 then
+    if ui_dormant_switch:get() and dormant_aimbot.variables.is_reachable[player:get_index()] and player:get_network_state() ~= 0 and player:get_network_state() ~= 5 then
         return "DA"
     end
 end)
@@ -423,21 +547,23 @@ events.player_hurt:set(function(e)
     if shot_time == nil then
         return
     end
+
     if globals.tickcount - shot_time == 1 then
         local attacker = entity.get(e.attacker, true)
 
         if dormant_aimbot.variables.lp == attacker then
             local victim = entity.get(e.userid, true)
             local hgroup = dormant_aimbot.consts.hitgroup_str[e.hitgroup]
-            if ui_dormant_logs:get() then
 
-                print_raw(("\a00FF00[Dormant Aimbot] \aFFFFFFHit %s(%d) in %s(%s) for %d(%d) damage (%d health remaining)"):format(
+            if ui_dormant_logs:get() then
+                print_raw(("\a00FF00[Dormant Aimbot] \aFFFFFFHit %s(%d%s) in %s(%s) for %d(%d) damage (%d health remaining)"):format(
                     victim:get_name(), 
                     dormant_aimbot.aimbot_shot.hitchance, 
+                    "%",
                     hgroup, 
                     dormant_aimbot.aimbot_shot.hitgroup, 
                     e.dmg_health, 
-                    dormant_aimbot.aimbot_shot.damage, 
+                    dormant_aimbot.aimbot_shot.damage,
                     e.health
                 ))
             end
