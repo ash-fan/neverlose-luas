@@ -22,7 +22,6 @@ hboxes["right_forearm"]   = 18
 -- ui
 local ui_dormant             = ui.create("Dormant Aimbot")
 local ui_dormant_switch      = ui_dormant:switch("Dormant Aimbot", false)
-local ui_dormant_logs        = ui_dormant:switch("Logs", false)
 
 local ui_settings            = ui.create("Settings")
 local ui_settings_hitboxes   = ui_settings:selectable("Hitboxes", "Head", "Chest", "Stomach", "Arms", "Legs", "Feet")
@@ -34,10 +33,10 @@ local ui_settings_valid_time = ui_settings:slider("Dormant Valid Time", 0, 500, 
 local ui_accuracy            = ui.create("Accuracy")
 local ui_accuracy_autoscope  = ui_accuracy:switch("Auto Scope", false)
 local ui_accuracy_autostop   = ui_accuracy:switch("Auto Stop", false)
+local ui_accuracy_velfix     = ui_accuracy:switch("Velocity Fix", false)
 
-local ui_velfix              = ui.create("Velocity Fix")
-local ui_velfix_a            = ui_velfix:switch("Method 1", false)
-local ui_velfix_b            = ui_velfix:switch("Method 2", false)
+local ui_misc                = ui.create("Misc")
+local ui_misc_logs           = ui_misc:switch("Logs", false)
 
 local dormant_aimbot = new_class()
     :struct 'consts' {
@@ -55,22 +54,19 @@ local dormant_aimbot = new_class()
         WEAPONTYPE_HEALTHSHOT 	 = 11,
 
         hbox_radius              = { 4.2, 3.5, 6.0, 6.0, 6.5, 6.2, 5.0, 5.0, 5.0, 4.0, 4.0, 3.6, 3.7, 4.0, 4.0, 3.3, 3.0, 3.3, 3.0 },
-        -- hbox_factor              = { 0.4, 0.1, 0.9, 0.9, 0.9, 0.8, 0.8, 0.7, 0.7, 0.6, 0.6, 0.5, 0.5, 0.5, 0.5, 0.6, 0.6, 0.6, 0.6 },
-        hbox_factor              = { 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0 },
         hitgroup_str             = { [0] = "generic", "head", "chest", "stomach", "left arm", "right arm", "left leg", "right leg", "neck", "generic", "gear" }
     }
-    :struct 'aimbot_shot' {
-        tickcount = nil,
-        victim    = nil,
-        hitchance = nil,
-        hitgroup  = nil,
-        damage    = nil,
-        point     = nil,
-        handled   = nil
-    }
+    -- :struct 'aimbot_shot' {
+    --     tickcount = nil,
+    --     victim    = nil,
+    --     hitchance = nil,
+    --     hitgroup  = nil,
+    --     damage    = nil,
+    --     point     = nil,
+    --     handled   = nil
+    -- }
     :struct 'player_info' {
         last_origin_pos = {},
-        last_alpha      = {},
         last_velocity   = {},
         tickcount       = {},
         is_valid        = {}
@@ -87,13 +83,15 @@ local dormant_aimbot = new_class()
         weapon_info      = nil,
         weapon_type      = nil,
         range_modifier   = nil,
-        armor_resist     = nil,
 
         camera_position  = nil,
         camera_direction = nil,
 
         mindmg           = nil,
         minhc            = nil,
+
+        dmg              = nil,
+        hbox             = nil,
 
         initialize       = function(self, cmd)
             self.cmd              = cmd
@@ -104,7 +102,6 @@ local dormant_aimbot = new_class()
             self.weapon_info      = self.weapon:get_weapon_info()
             self.weapon_type      = self.weapon_info["weapon_type"]
             self.range_modifier   = self.weapon_info["range_modifier"]
-            self.armor_resist     = 1.0 - self.weapon_info["armor_ratio"] * 0.5
 
             self.camera_position  = render.camera_position()
             self.camera_direction = vector():angles(render.camera_angles())
@@ -134,9 +131,9 @@ local dormant_aimbot = new_class()
                 return false
             end
 
-            if not target:is_enemy() then
-                return false
-            end
+            -- if not target:is_enemy() then
+            --     return false
+            -- end
 
             if self.variables.lp:get_origin():dist(target:get_origin()) > self.variables.weapon_info["range"] then -- out of weapon's range
                 return false
@@ -232,7 +229,7 @@ local dormant_aimbot = new_class()
                 return 0.0
             end
     
-            return self.consts.hbox_radius[hbox] * self.consts.hbox_factor[hbox]
+            return self.consts.hbox_radius[hbox]
         end,
 
         calculate_hc = function(self, inaccuracy, point, radius) -- [0, 1] | with help of CShotManipulator::ApplySpread
@@ -269,7 +266,7 @@ local dormant_aimbot = new_class()
 
         choose_hbox = function(self, target) -- tries to prefer safety over dmg
             local idx           = target:get_index()
-            local m_bDormant    = ffi.cast("bool*", ffi.cast("unsigned int", target[0]) + 0xED) -- 0xED - m_bDormant offset
+            local m_bDormant    = ffi.cast("bool*", ffi.cast("uintptr_t", target[0]) + 0xED) -- 0xED - m_bDormant offset
             local best_hbox     = nil
             local highest_w_dmg = 0.0
 
@@ -277,29 +274,30 @@ local dormant_aimbot = new_class()
 
             for hbox = 1, #self.variables.hbox_state do
                 if self.variables.hbox_state[hbox] then
-                    local target_hbox_pos = target:get_hitbox_position(hbox - 1) -- lua starts array indexes with 1
-
-                    m_bDormant = false -- dmg calc fix found in old chimera source : if entity is not dormant then utils.trace_bullet takes an impact with it into account. If entity is dormant then it ignores entity
+                    local target_hbox_pos = target:get_hitbox_position(hbox - 1) 
+                    
+                    m_bDormant[0] = false -- dmg calc fix found in old chimera source : if entity is not dormant then utils.trace_bullet takes an impact with it into account. If entity is dormant then it ignores entity
                     local dmg, trace = utils.trace_bullet(self.variables.lp, self.variables.eyepos, target_hbox_pos)
-                    m_bDormant = true
+                    m_bDormant[0] = true
 
-                    if trace.entity ~= nil and not trace.entity:is_enemy() then
+                    if trace.entity == nil or trace.entity ~= nil and not trace.entity:is_enemy() or dmg < self.variables.mindmg then
                         goto continue
                     end
 
-                    if dmg > 0 then
-                        self.variables.is_reachable[idx] = true
-                        local maxhc = 100 * self:max_hc(target_hbox_pos, self:get_hbox_radius(hbox))
-                        if dmg >= self.variables.mindmg and maxhc >= self.variables.minhc then
-                            local w_dmg = self:get_weighted_damage(hbox, dmg)
-                            if w_dmg > highest_w_dmg then
-                                best_hbox     = hbox
-                                highest_w_dmg = w_dmg
-                            end
-                        end
+                    self.variables.is_reachable[idx] = true
+                    local maxhc = 100 * self:max_hc(target_hbox_pos, self:get_hbox_radius(hbox))
+                    if maxhc < self.variables.minhc then
+                        goto continue
                     end
-                    ::continue::
+
+                    local w_dmg = self:get_weighted_damage(hbox, dmg)
+                    if w_dmg > highest_w_dmg then
+                        best_hbox          = hbox
+                        highest_w_dmg      = w_dmg
+                        self.variables.dmg = dmg
+                    end
                 end
+                ::continue::
             end
 
             return best_hbox
@@ -312,17 +310,17 @@ local dormant_aimbot = new_class()
             local closest_distance = math.huge
 
             for _, enemy in ipairs(enemies) do
-                local idx   = enemy:get_index()
                 local alpha = enemy:get_bbox().alpha
 
                 if self:target_check(enemy) and 5 * (0.8 - alpha) < ui_settings_valid_time:get() * 0.01 then 
                     local origin = enemy:get_origin()
-
-                    if self:choose_hbox(enemy) ~= nil then -- dmg check
+                    local hbox   = self:choose_hbox(enemy)
+                    if hbox ~= nil then -- dmg check
                         local ray_distance = origin:dist_to_ray(self.variables.camera_position, self.variables.camera_direction)
                         if ray_distance < closest_distance then
-                            closest_distance = ray_distance
-                            closest_enemy    = enemy
+                            closest_distance    = ray_distance
+                            closest_enemy       = enemy
+                            self.variables.hbox = hbox
                         end
                     end
                 end
@@ -358,25 +356,24 @@ local dormant_aimbot = new_class()
             if not ui_dormant_switch:get() then
                 return
             end
-
             if not self:lp_check() then 
                 return 
             end
 
             self.variables:initialize(cmd)
             
-            if self.aimbot_shot.tickcount ~= nil and globals.tickcount - self.aimbot_shot.tickcount > 1 and not self.aimbot_shot.handled then
-                if ui_dormant_logs:get() then
-                    print_raw(("\a00FF00[Dormant Aimbot] \aFFFFFFMissed %s(%d%s) in %s for %d damage"):format(
-                    self.aimbot_shot.victim:get_name(), 
-                    self.aimbot_shot.hitchance,
-                    "%",
-                    self.aimbot_shot.hitgroup,
-                    self.aimbot_shot.damage
-                ))
-                end
-                self.aimbot_shot.handled = true
-            end
+            -- if self.aimbot_shot.tickcount ~= nil and globals.tickcount - self.aimbot_shot.tickcount > 1 and not self.aimbot_shot.handled then
+            --     if ui_misc_logs:get() then
+            --         print_raw(("\a00FF00[Dormant Aimbot] \aFFFFFFMissed %s(%d%s) in %s for %d damage"):format(
+            --         self.aimbot_shot.victim:get_name(), 
+            --         self.aimbot_shot.hitchance,
+            --         "%",
+            --         self.aimbot_shot.hitgroup,
+            --         self.aimbot_shot.damage
+            --     ))
+            --     end
+            --     self.aimbot_shot.handled = true
+            -- end
 
             if not self:weapon_check() then 
                 return 
@@ -387,13 +384,14 @@ local dormant_aimbot = new_class()
                 return
             end
 
-            local idx        = target:get_index()
-            local hbox       = self:choose_hbox(target)
-            local aim_point  = target:get_hitbox_position(hbox - 1)
-
-            if self.player_info.is_valid[idx] and (ui_velfix_a:get() or ui_velfix_b:get()) then -- velocity adjustment
-                local delta = globals.tickcount - self.player_info.tickcount[idx]
-                aim_point = aim_point + self.player_info.last_velocity[idx] * delta * globals.tickinterval
+            local idx       = target:get_index()
+            local aim_point = target:get_hitbox_position(self.variables.hbox - 1)
+ 
+            if self.player_info.is_valid[idx] and ui_accuracy_velfix:get() then -- velocity adjustment
+                local delta = (globals.tickcount - self.player_info.tickcount[idx]) * globals.tickinterval
+                if delta < 1.0 then 
+                    aim_point = aim_point + self.player_info.last_velocity[idx] * delta
+                end
             end
 
             local aim_angles = self.variables.eyepos:to(aim_point):angles()
@@ -408,26 +406,37 @@ local dormant_aimbot = new_class()
             local hc
             if self.variables.weapon_info["is_revolver"] then
                 if self.variables.cmd.in_duck == 1 then
-                    hc = 100 * self:calculate_hc(self.variables.weapon:get_inaccuracy() * 0.2 + self.variables.weapon:get_spread() * 0.00765, aim_point, self:get_hbox_radius(hbox)) -- 0.00765 = (13 / 17) / 100
+                    hc = self:calculate_hc(self.variables.weapon:get_inaccuracy() * 0.2 + self.variables.weapon:get_spread() * 0.00765, aim_point, self:get_hbox_radius(self.variables.hbox)) -- 0.00765 = (13 / 17) / 100
                 else
-                    hc = 100 * self:calculate_hc(self.variables.weapon:get_inaccuracy() * 0.166 + self.variables.weapon:get_spread() * 0.00765, aim_point, self:get_hbox_radius(hbox)) 
+                    hc = self:calculate_hc(self.variables.weapon:get_inaccuracy() * 0.166 + self.variables.weapon:get_spread() * 0.00765, aim_point, self:get_hbox_radius(self.variables.hbox)) 
                 end
             else 
-                hc = 100 * self:calculate_hc(self.variables.weapon:get_inaccuracy() + self.variables.weapon:get_spread(), aim_point, self:get_hbox_radius(hbox))
+                hc = self:calculate_hc(self.variables.weapon:get_inaccuracy() + self.variables.weapon:get_spread(), aim_point, self:get_hbox_radius(self.variables.hbox))
             end
+            hc = 100 * hc
 
             if hc >= self.variables.minhc then
                 self.variables.cmd.view_angles = aim_angles
                 self.variables.cmd.in_attack   = true
 
+                if ui_misc_logs:get() then
+                    print_raw(("\a00FF00[Dormant Aimbot] \aFFFFFFShot in %s(%d%s) in %s for %d damage"):format(
+                        target:get_name(), 
+                        hc,
+                        "%",
+                        self:get_hitgroup_name(self.variables.hbox),
+                        self.variables.dmg
+                    ))
+                end
+
                 -- log
-                self.aimbot_shot.tickcount     = globals.tickcount
-                self.aimbot_shot.victim        = target
-                self.aimbot_shot.hitchance     = hc
-                self.aimbot_shot.hitgroup      = self:get_hitgroup_name(hbox)
-                self.aimbot_shot.damage        = utils.trace_bullet(self.variables.lp, self.variables.eyepos, aim_point)
-                self.aimbot_shot.handled       = false
-                self.aimbot_shot.point         = aim_point
+                -- self.aimbot_shot.tickcount     = globals.tickcount
+                -- self.aimbot_shot.victim        = target
+                -- self.aimbot_shot.hitchance     = hc
+                -- self.aimbot_shot.hitgroup      = self:get_hitgroup_name(self.variables.hbox)
+                -- self.aimbot_shot.damage        = utils.trace_bullet(self.variables.lp, self.variables.eyepos, aim_point)
+                -- self.aimbot_shot.handled       = false
+                -- self.aimbot_shot.point         = aim_point
             end
         end,
 
@@ -437,37 +446,28 @@ local dormant_aimbot = new_class()
             for _, enemy in ipairs(enemies) do
                 local idx = enemy:get_index()
 
-                if enemy:is_alive() then
-                    local alpha = enemy:get_bbox().alpha
+                if enemy ~= nil and enemy:is_alive() then
                     local origin = enemy:get_origin()
 
                     if self.player_info.last_origin_pos[idx] == nil then
                         self.player_info.last_origin_pos[idx] = vector(0, 0, 0)
-                        self.player_info.last_alpha[idx]      = 0
                         self.player_info.last_velocity[idx]   = vector(0, 0, 0)
                         self.player_info.tickcount[idx]       = globals.tickcount
                         self.player_info.is_valid[idx]        = false
-                    end
-                    if enemy:get_network_state() == 0 then
-                        self.player_info.last_origin_pos[idx] = origin
-                        self.player_info.last_alpha[idx]      = alpha
-                        self.player_info.last_velocity[idx]   = enemy["m_vecVelocity"]
-                        self.player_info.tickcount[idx]       = globals.tickcount
-                        self.player_info.is_valid[idx]        = true
-                    elseif enemy:get_network_state() ~= 5 then
-                        if alpha - self.player_info.last_alpha[idx] > -0.001 then
-                            if self.player_info.is_valid[idx] then
-                                self.player_info.last_velocity[idx] = (origin - self.player_info.last_origin_pos[idx]) / ((globals.tickcount - self.player_info.tickcount[idx]) * globals.tickinterval)
+                    elseif self.player_info.last_origin_pos[idx] ~= origin then
+                        if enemy:get_network_state() == 0 then
+                            self.player_info.last_velocity[idx] = enemy["m_vecVelocity"]
+                        else
+                            local delta = (globals.tickcount - self.player_info.tickcount[idx]) * globals.tickinterval
+                            if self.player_info.is_valid[idx] and delta < 1.0 then -- dont update velocity if prev enemy pos was too old
+                                self.player_info.last_velocity[idx] = (origin - self.player_info.last_origin_pos[idx]) / delta
                             else
                                 self.player_info.last_velocity[idx] = vector(0, 0, 0)
                             end
-                            self.player_info.last_origin_pos[idx] = origin
-                            self.player_info.last_alpha[idx]      = alpha
-                            self.player_info.tickcount[idx]       = globals.tickcount
-                            self.player_info.is_valid[idx]        = true
-                        else
-                            self.player_info.last_alpha[idx]      = alpha
                         end
+                        self.player_info.last_origin_pos[idx] = origin
+                        self.player_info.tickcount[idx]       = globals.tickcount
+                        self.player_info.is_valid[idx]        = true
                     end
                 else
                     self.player_info.is_valid[idx] = false
@@ -516,13 +516,10 @@ dormant_aimbot.aimbot:update_hboxes()
 
 -- callbacks
 events.createmove:set(function(cmd)
-    if ui_velfix_a:get() then
+    if ui_accuracy_velfix:get() then
         dormant_aimbot.aimbot:update_enemy_info()
     end
     dormant_aimbot.aimbot:run(cmd)
-    if ui_velfix_b:get() then
-        dormant_aimbot.aimbot:update_enemy_info()
-    end
 end)
 
 ui_settings_hitboxes:set_callback(function() 
@@ -535,32 +532,32 @@ local esp_dormant_flag = esp.enemy:new_text("Dormant Aimbot", "DA", function(pla
     end
 end)
 
-events.player_hurt:set(function(e)
-    local shot_time = dormant_aimbot.aimbot_shot.tickcount
-    if shot_time == nil then
-        return
-    end
+-- events.player_hurt:set(function(e)
+--     local shot_time = dormant_aimbot.aimbot_shot.tickcount
+--     if shot_time == nil then
+--         return
+--     end
 
-    if globals.tickcount - shot_time == 1 then
-        local attacker = entity.get(e.attacker, true)
+--     if globals.tickcount - shot_time == 1 then
+--         local attacker = entity.get(e.attacker, true)
 
-        if dormant_aimbot.variables.lp == attacker then
-            local victim = entity.get(e.userid, true)
-            local hgroup = dormant_aimbot.consts.hitgroup_str[e.hitgroup]
+--         if dormant_aimbot.variables.lp == attacker then
+--             local victim = entity.get(e.userid, true)
+--             local hgroup = dormant_aimbot.consts.hitgroup_str[e.hitgroup]
 
-            if ui_dormant_logs:get() then
-                print_raw(("\a00FF00[Dormant Aimbot] \aFFFFFFHit %s(%d%s) in %s(%s) for %d(%d) damage (%d health remaining)"):format(
-                    victim:get_name(), 
-                    dormant_aimbot.aimbot_shot.hitchance, 
-                    "%",
-                    hgroup, 
-                    dormant_aimbot.aimbot_shot.hitgroup, 
-                    e.dmg_health, 
-                    dormant_aimbot.aimbot_shot.damage,
-                    e.health
-                ))
-            end
-            dormant_aimbot.aimbot_shot.handled = true
-        end
-    end
-end)
+--             if ui_misc_logs:get() then
+--                 print_raw(("\a00FF00[Dormant Aimbot] \aFFFFFFHit %s(%d%s) in %s(%s) for %d(%d) damage (%d health remaining)"):format(
+--                     victim:get_name(), 
+--                     dormant_aimbot.aimbot_shot.hitchance, 
+--                     "%",
+--                     hgroup, 
+--                     dormant_aimbot.aimbot_shot.hitgroup, 
+--                     e.dmg_health, 
+--                     dormant_aimbot.aimbot_shot.damage,
+--                     e.health
+--                 ))
+--             end
+--             dormant_aimbot.aimbot_shot.handled = true
+--         end
+--     end
+-- end)
