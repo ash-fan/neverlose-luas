@@ -37,6 +37,7 @@ local ui_accuracy_velfix     = ui_accuracy:switch("Velocity Fix", false)
 
 local ui_misc                = ui.create("Misc")
 local ui_misc_logs           = ui_misc:switch("Logs", false)
+local ui_misc_debug_mode     = ui_misc:switch("Debug mode", false)
 
 local dormant_aimbot = new_class()
     :struct 'consts' {
@@ -69,7 +70,8 @@ local dormant_aimbot = new_class()
         last_origin_pos = {},
         last_velocity   = {},
         tickcount       = {},
-        is_valid        = {}
+        is_valid        = {},
+        misscount       = {}
     }
     :struct 'variables' {
         hbox_state       = { false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false },
@@ -130,10 +132,6 @@ local dormant_aimbot = new_class()
             if not target:is_alive() then
                 return false
             end
-
-            -- if not target:is_enemy() then
-            --     return false
-            -- end
 
             if self.variables.lp:get_origin():dist(target:get_origin()) > self.variables.weapon_info["range"] then -- out of weapon's range
                 return false
@@ -215,7 +213,7 @@ local dormant_aimbot = new_class()
                 return dmg * 0.25
             end
             if hgroup == "chest" then
-                return dmg * 0.9
+                return dmg * 0.8
             end
             if hgroup == "stomach" then
                 return dmg
@@ -276,11 +274,11 @@ local dormant_aimbot = new_class()
                 if self.variables.hbox_state[hbox] then
                     local target_hbox_pos = target:get_hitbox_position(hbox - 1) 
                     
-                    m_bDormant[0] = false -- dmg calc fix found in old chimera source : if entity is not dormant then utils.trace_bullet takes an impact with it into account. If entity is dormant then it ignores entity
+                    m_bDormant[0] = 0 -- dmg calc fix found in old chimera source : if entity is not dormant then utils.trace_bullet takes an impact with it into account. If entity is dormant then it ignores entity
                     local dmg, trace = utils.trace_bullet(self.variables.lp, self.variables.eyepos, target_hbox_pos)
-                    m_bDormant[0] = true
+                    m_bDormant[0] = 1
 
-                    if trace.entity == nil or trace.entity ~= nil and not trace.entity:is_enemy() or dmg < self.variables.mindmg then
+                    if trace.entity ~= nil and not trace.entity:is_enemy() or dmg < self.variables.mindmg then
                         goto continue
                     end
 
@@ -308,14 +306,13 @@ local dormant_aimbot = new_class()
 
             local closest_enemy    = nil
             local closest_distance = math.huge
-
             for _, enemy in ipairs(enemies) do
                 local alpha = enemy:get_bbox().alpha
 
                 if self:target_check(enemy) and 5 * (0.8 - alpha) < ui_settings_valid_time:get() * 0.01 then 
-                    local origin = enemy:get_origin()
-                    local hbox   = self:choose_hbox(enemy)
+                    local hbox = self:choose_hbox(enemy)
                     if hbox ~= nil then -- dmg check
+                        local origin = enemy:get_origin()
                         local ray_distance = origin:dist_to_ray(self.variables.camera_position, self.variables.camera_direction)
                         if ray_distance < closest_distance then
                             closest_distance    = ray_distance
@@ -420,7 +417,7 @@ local dormant_aimbot = new_class()
                 self.variables.cmd.in_attack   = true
 
                 if ui_misc_logs:get() then
-                    print_raw(("\a00FF00[Dormant Aimbot] \aFFFFFFShot in %s(%d%s) in %s for %d damage"):format(
+                    print_raw(("\a00FF00[Dormant Aimbot] \aFFFFFFShot in %s(%d%s)'s %s for %d damage"):format(
                         target:get_name(), 
                         hc,
                         "%",
@@ -522,6 +519,17 @@ events.createmove:set(function(cmd)
     dormant_aimbot.aimbot:run(cmd)
 end)
 
+events.render:set(function(ctx)
+    if ui_misc_debug_mode:get() then
+        local enemies = entity.get_players(true)
+        for _, enemy in ipairs(enemies) do
+            local origin = enemy:get_origin()
+            local alpha = enemy:get_bbox().alpha
+            render.text(1, origin:to_screen(), color(255, 255, 255), nil, alpha)
+        end
+    end
+end)
+
 ui_settings_hitboxes:set_callback(function() 
     dormant_aimbot.aimbot:update_hboxes()
 end)
@@ -529,6 +537,15 @@ end)
 local esp_dormant_flag = esp.enemy:new_text("Dormant Aimbot", "DA", function(player)
     if ui_dormant_switch:get() and dormant_aimbot.variables.is_reachable[player:get_index()] and player:get_network_state() ~= 0 and player:get_network_state() ~= 5 then
         return "DA"
+    end
+end)
+
+events.player_hurt:set(function(e)
+    local attacker = entity.get(e.attacker, true)
+    local victim = entity.get(e.userid, true)
+
+    if attacker == dormant_aimbot.variables.lp then
+        dormant_aimbot.player_info.misscount[victim:get_index()] = 0
     end
 end)
 
